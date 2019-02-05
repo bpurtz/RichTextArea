@@ -21,8 +21,12 @@
   ],
   "dependencies": {
     "axios": "^0.18.0",
+    "build": "^0.1.4",
     "classnames": "^2.2.6",
     "draft-js": "^0.10.5",
+    "draft-js-emoji-plugin": "^2.1.1",
+    "draft-js-image-plugin": "^2.0.6",
+    "draft-js-plugins-editor": "^2.1.1",
     "immutable": "^4.0.0-rc.12",
     "jwt-decode": "^2.2.0",
     "moment": "^2.22.2",

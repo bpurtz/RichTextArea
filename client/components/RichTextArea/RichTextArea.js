@@ -1,19 +1,249 @@
 import React, { Component } from "react";
+import PropTypes from "prop-types";
+
 import {
   EditorState,
-  Editor,
   RichUtils,
   ContentState,
   DefaultDraftBlockRenderMap,
   AtomicBlockUtils,
   CompositeDecorator,
   ContentBlock,
-  convertToRaw
+  convertToRaw,
+  getDefaultKeyBinding
 } from "draft-js";
+import Editor from "draft-js-plugins-editor";
+import InlineStyleControls from "./InlineStyleControls";
+import BlockStyleControls from "./BlockStyleControls";
+import MediaControls from "./MediaControls";
+import UndoControls from "./UndoControls";
 import { Map } from "immutable";
 
-import UserImage from "./UserImage";
+export default class RichTextArea extends Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+      editorState: EditorState.createEmpty(),
+      editable: true
+    };
+    this.focus = () => this.refs.editor.focus();
+    this.logState = () => {
+      const content = this.state.editorState.getCurrentContent();
+      console.log(convertToRaw(content));
+    };
+    this.onChange = editorState => this.setState({ editorState });
 
+    this.handleKeyCommand = this._handleKeyCommand.bind(this);
+    this.mapKeyToEditorCommand = this._mapKeyToEditorCommand.bind(this);
+    this.toggleBlockType = this._toggleBlockType.bind(this);
+    this.toggleInlineStyle = this._toggleInlineStyle.bind(this);
+    this.getMediaEntities = this._getMediaEntities.bind(this);
+    this.toggleEditable = this._toggleEditable.bind(this);
+  }
+
+  _getMediaEntities(e) {
+    let imageBlockArray = getEntities(this.state.editorState, "image");
+    let videoBlockArray = getEntities(this.state.editorState, "video");
+    console.log(
+      getDataArrayFromEntityBlocks(imageBlockArray.concat(videoBlockArray))
+    );
+  }
+
+  /*    KEY BINDINGS    */
+  // Used to add a key command by returning the key command
+  _mapKeyToEditorCommand(e) {
+    console.log(e.keyCode);
+    if (e.keyCode === 9 /* TAB */) {
+      const newEditorState = RichUtils.onTab(
+        e,
+        this.state.editorState,
+        4 /* maxDepth */
+      );
+      if (newEditorState !== this.state.editorState) {
+        this.onChange(newEditorState);
+      }
+      return;
+    }
+    return getDefaultKeyBinding(e);
+  }
+
+  // Used to handle the key commands set in mapKeyToEditorCommand
+  _handleKeyCommand(command, editorState) {
+    // Handles default key commands
+    const newState = RichUtils.handleKeyCommand(editorState, command);
+    if (newState) {
+      this.onChange(newState);
+      return "handled";
+    }
+    return "not-handled";
+  }
+
+  /*    Block   */
+  _toggleBlockType(blockType) {
+    this.onChange(RichUtils.toggleBlockType(this.state.editorState, blockType));
+  }
+
+  /*    Inline    */
+  _toggleInlineStyle(inlineStyle) {
+    this.onChange(
+      RichUtils.toggleInlineStyle(this.state.editorState, inlineStyle)
+    );
+  }
+
+  _toggleEditable() {
+    this.setState({ editable: !this.state.editable });
+  }
+
+  render() {
+    return (
+      <div>
+        <BlockStyleControls
+          editorState={this.state.editorState}
+          onToggle={this.toggleBlockType}
+        />
+        <InlineStyleControls
+          editorState={this.state.editorState}
+          onToggle={this.toggleInlineStyle}
+        />
+        <MediaControls
+          editorState={this.state.editorState}
+          onChange={this.onChange}
+        />
+        <UndoControls
+          editorState={this.state.editorState}
+          onChange={this.onChange}
+        />
+        <div onClick={this.focus}>
+          <Editor
+            readOnly={!this.state.editable}
+            blockStyleFn={getBlockStyle}
+            customStyleMap={styleMap}
+            blockRendererFn={mediaBlockRenderer}
+            editorState={this.state.editorState}
+            handleKeyCommand={this.handleKeyCommand}
+            keyBindingFn={this.mapKeyToEditorCommand}
+            onChange={this.onChange}
+            onTab={this.mapKeyToEditorCommand}
+            placeholder="Enter some text..."
+            ref="editor"
+            spellCheck={true}
+          />
+        </div>
+        <input onClick={this.logState} type="button" value="Log State" />
+        <input
+          onClick={this.getMediaEntities}
+          type="button"
+          value="Alert media entities"
+        />
+        <input
+          onClick={this.toggleEditable}
+          type="button"
+          value="Toggle editable"
+        />
+      </div>
+    );
+  }
+}
+
+// Custom overrides for "code" style.
+const styleMap = {
+  CODE: {
+    backgroundColor: "rgba(0, 0, 0, 0.05)",
+    fontFamily: '"Inconsolata", "Menlo", "Consolas", monospace',
+    fontSize: 16,
+    padding: 2
+  }
+};
+
+// Adds a class to a certain block-type for styling in css
+function getBlockStyle(block) {
+  switch (block.getType()) {
+    case "blockquote":
+      return "RichEditor-blockquote";
+    default:
+      return null;
+  }
+}
+
+/* Media */
+function mediaBlockRenderer(block) {
+  if (block.getType() === "atomic") {
+    return {
+      component: Media,
+      editable: false
+    };
+  }
+  return null;
+}
+
+const Image = props => {
+  return <img src={props.src} />;
+};
+const Video = props => {
+  const youtubePattern = new RegExp(/youtube/i);
+  if (youtubePattern.test(props.src)) {
+    return <iframe width="420" height="315" src={props.src} />;
+  } else {
+    return (
+      <video width="400" controls>
+        <source src={props.src} type="video/mp4" />
+        Your browser does not support HTML5 video.
+      </video>
+    );
+  }
+};
+const Media = props => {
+  const entity = props.contentState.getEntity(props.block.getEntityAt(0));
+  const { src } = entity.getData();
+  const type = entity.getType();
+  let media;
+  if (type === "image") {
+    media = <Image src={src} />;
+  } else if (type === "video") {
+    media = <Video src={src} />;
+  }
+  return media;
+};
+
+/*  ENTITY HELPERS  */
+const getEntities = (editorState, entityType = null) => {
+  const content = editorState.getCurrentContent();
+  const entities = [];
+  content.getBlocksAsArray().forEach(block => {
+    let selectedEntity = null;
+    block.findEntityRanges(
+      character => {
+        if (character.getEntity() !== null) {
+          const entity = content.getEntity(character.getEntity());
+          if (!entityType || (entityType && entity.getType() === entityType)) {
+            selectedEntity = {
+              entityKey: character.getEntity(),
+              blockKey: block.getKey(),
+              entity: content.getEntity(character.getEntity())
+            };
+            return true;
+          }
+        }
+        return false;
+      },
+      (start, end) => {
+        entities.push({ ...selectedEntity, start, end });
+      }
+    );
+  });
+  return entities;
+};
+
+// Can only pass array of entityBlocks
+const getDataArrayFromEntityBlocks = entityBlocks => {
+  let dataArray = [];
+  for (let i = 0; i < entityBlocks.length; i++) {
+    dataArray.push(entityBlocks[i].entity.data);
+  }
+  return dataArray;
+};
+
+/* Used to surround a regex with a component
 const regexStratergy = (block, callback) => {
   const text = block.getText();
   let result;
@@ -36,217 +266,4 @@ const compositeDecorator = new CompositeDecorator([
     component: regexComponent
   }
 ]);
-
-export default class RichTextArea extends Component {
-  constructor(props) {
-    super(props);
-    this.state = {
-      editorState: EditorState.createEmpty(compositeDecorator),
-      showURLInput: false,
-      url: "",
-      urlType: ""
-    };
-    this.focus = () => this.refs.editor.focus();
-    this.logState = () => {
-      const content = this.state.editorState.getCurrentContent();
-      console.log(convertToRaw(content));
-    };
-    this.onChange = editorState => this.setState({ editorState });
-    this.onURLChange = e => this.setState({ urlValue: e.target.value });
-    this.addAudio = this._addAudio.bind(this);
-    this.addImage = this._addImage.bind(this);
-    this.addVideo = this._addVideo.bind(this);
-    this.confirmMedia = this._confirmMedia.bind(this);
-    this.handleKeyCommand = this._handleKeyCommand.bind(this);
-    this.onURLInputKeyDown = this._onURLInputKeyDown.bind(this);
-  }
-  _handleKeyCommand(command, editorState) {
-    const newState = RichUtils.handleKeyCommand(editorState, command);
-    if (newState) {
-      this.onChange(newState);
-      return true;
-    }
-    return false;
-  }
-  _confirmMedia(e) {
-    e.preventDefault();
-    const { editorState, urlValue, urlType } = this.state;
-    const contentState = editorState.getCurrentContent();
-    const contentStateWithEntity = contentState.createEntity(
-      urlType,
-      "IMMUTABLE",
-      { src: urlValue }
-    );
-    const entityKey = contentStateWithEntity.getLastCreatedEntityKey();
-    const newEditorState = EditorState.set(editorState, {
-      currentContent: contentStateWithEntity
-    });
-    this.setState(
-      {
-        editorState: AtomicBlockUtils.insertAtomicBlock(
-          newEditorState,
-          entityKey,
-          " "
-        ),
-        showURLInput: false,
-        urlValue: ""
-      },
-      () => {
-        setTimeout(() => this.focus(), 0);
-      }
-    );
-  }
-  _onURLInputKeyDown(e) {
-    if (e.which === 13) {
-      this._confirmMedia(e);
-    }
-  }
-  _promptForMedia(type) {
-    this.setState(
-      {
-        showURLInput: true,
-        urlValue: "",
-        urlType: type
-      },
-      () => {
-        setTimeout(() => document.getElementById("mediaPath").focus(), 0);
-      }
-    );
-  }
-  _addAudio() {
-    this._promptForMedia("audio");
-  }
-  _addImage() {
-    this._promptForMedia("image");
-  }
-  _addVideo() {
-    this._promptForMedia("video");
-  }
-  render() {
-    let urlInput;
-    if (this.state.showURLInput) {
-      urlInput = (
-        <div style={styles.urlInputContainer}>
-          <input
-            onChange={this.onURLChange}
-            id="mediaPath"
-            style={styles.urlInput}
-            type="text"
-            value={this.state.urlValue}
-            onKeyDown={this.onURLInputKeyDown}
-          />
-          <button onMouseDown={this.confirmMedia}>Confirm</button>
-        </div>
-      );
-    }
-    return (
-      <div style={styles.root}>
-        <div style={{ marginBottom: 10 }}>
-          Use the buttons to add audio, image, or video.
-        </div>
-        <div style={{ marginBottom: 10 }}>
-          Here are some local examples that can be entered as a URL:
-          <ul>
-            <li>media.mp3</li>
-            <li>media.png</li>
-            <li>media.mp4</li>
-          </ul>
-        </div>
-        <div style={styles.buttons}>
-          <button onMouseDown={this.addAudio} style={{ marginRight: 10 }}>
-            Add Audio
-          </button>
-          <button onMouseDown={this.addImage} style={{ marginRight: 10 }}>
-            Add Image
-          </button>
-          <button onMouseDown={this.addVideo} style={{ marginRight: 10 }}>
-            Add Video
-          </button>
-        </div>
-        {urlInput}
-        <div style={styles.editor} onClick={this.focus}>
-          <Editor
-            blockRendererFn={mediaBlockRenderer}
-            editorState={this.state.editorState}
-            handleKeyCommand={this.handleKeyCommand}
-            onChange={this.onChange}
-            placeholder="Enter some text..."
-            ref="editor"
-          />
-        </div>
-        <input
-          onClick={this.logState}
-          style={styles.button}
-          type="button"
-          value="Log State"
-        />
-      </div>
-    );
-  }
-}
-function mediaBlockRenderer(block) {
-  if (block.getType() === "atomic") {
-    return {
-      component: Media,
-      editable: false
-    };
-  }
-  return null;
-}
-const Audio = props => {
-  return <audio controls src={props.src} style={styles.media} />;
-};
-const Image = props => {
-  return <img src={props.src} style={styles.media} />;
-};
-const Video = props => {
-  return <video controls src={props.src} style={styles.media} />;
-};
-const Media = props => {
-  const entity = props.contentState.getEntity(props.block.getEntityAt(0));
-  const { src } = entity.getData();
-  const type = entity.getType();
-  let media;
-  if (type === "audio") {
-    media = <Audio src={src} />;
-  } else if (type === "image") {
-    media = <Image src={src} />;
-  } else if (type === "video") {
-    media = <Video src={src} />;
-  }
-  return media;
-};
-const styles = {
-  root: {
-    fontFamily: "'Georgia', serif",
-    padding: 20,
-    width: 600
-  },
-  buttons: {
-    marginBottom: 10
-  },
-  urlInputContainer: {
-    marginBottom: 10
-  },
-  urlInput: {
-    fontFamily: "'Georgia', serif",
-    marginRight: 10,
-    padding: 3
-  },
-  editor: {
-    border: "1px solid #ccc",
-    cursor: "text",
-    minHeight: 80,
-    padding: 10
-  },
-  button: {
-    marginTop: 10,
-    textAlign: "center"
-  },
-  media: {
-    width: "100%",
-    // Fix an issue with Firefox rendering video controls
-    // with 'pre-wrap' white-space
-    whiteSpace: "initial"
-  }
-};
+*/
