@@ -1,3 +1,10 @@
+/* USE:
+<RichTextArea
+  readOnly: Boolean
+  onChange: Function (calls with arguments: {contentState, [usedMedia], [uploadedMedia]})
+  contentState: Object (previously saved contentState. )
+/>
+*/
 import React, { Component } from "react";
 import PropTypes from "prop-types";
 
@@ -52,7 +59,6 @@ export default class RichTextArea extends Component {
   /*    KEY BINDINGS    */
   // Used to add a key command by returning the key command
   _mapKeyToEditorCommand(e) {
-    console.log(e.keyCode);
     if (e.keyCode === 9 /* TAB */) {
       const newEditorState = RichUtils.onTab(
         e,
